@@ -15,6 +15,7 @@ sealed trait Domino {
 
   override def toString: String = "[" + min + "," + max + "]"
 
+
   def min: Int
 
   def max: Int
@@ -22,6 +23,8 @@ sealed trait Domino {
   override def hashCode: Int = {
     10 * min + max
   }
+
+  def toPair: (Int, Int) = (min, max)
 }
 
 case class Pair(left: Int, right: Int) extends Domino {
@@ -58,6 +61,7 @@ case class Double(n: Int) extends Domino {
 
   override val max = n
 
+
   override def equals(that: Any): Boolean = {
     if (!that.isInstanceOf[Domino]) false
     else {
@@ -71,6 +75,10 @@ case class Double(n: Int) extends Domino {
 }
 
 object Domino {
+
+  implicit val dominoOrdering = new Ordering[Domino] {
+    override def compare(x: Domino, y: Domino): Int = (x.min * 10 + x.max).compareTo(y.min * 10 + y.max)
+  }
 
   def apply(left: Int, right: Int): Domino = {
     if (left == right) Double(left) else Pair(left, right)
@@ -95,35 +103,26 @@ object Domino {
     (doubles, pairs, characteristic(pairs))
   }
 
-  private def isFullSet(row: Domino*): Boolean = {
-    def go(acc: List[Set[Int]], curRow: Seq[Domino]): Boolean = {
-      if (curRow.isEmpty)
-        acc.reduce(_ & _).nonEmpty
-      else
-        curRow.head match {
-          case Pair(l, r) =>
-            if (acc.exists(_.contains(l)) || acc.exists(_.contains(r))) {
-              val list = acc.foldLeft(List.empty[Set[Int]])((b, s) => if (s.contains(l) || s.contains(r))
-                ((s + l) + r) :: b
-              else
-                s :: b)
-              go(list, curRow.tail)
-            }
-            else
-              go(Set(l, r) :: acc, curRow.tail)
-          case Double(n) =>
-            if (acc.exists(_.contains(n)))
-              go(acc, curRow.tail)
-            else
-              go(Set(n) :: acc, curRow.tail)
-        }
+  private def isFullSet(row: Seq[Domino]): Boolean = {
+    def go(acc: Set[Int], curRow: Seq[Domino]): Boolean = {
+      if (curRow.isEmpty) true
+      else {
+        val filterInclude = curRow.filter(d => acc.contains(d.toPair._1) || acc.contains(d.toPair._2))
+        val filterNotInclude = curRow.filter(d => !(acc.contains(d.toPair._1) && acc.contains(d.toPair._2)))
+        if (filterInclude.isEmpty) false
+        else
+          go(filterInclude.foldLeft(acc)((b, a) =>
+            b + a.toPair._1 + a.toPair._2
+          ), filterNotInclude)
+      }
     }
-    go(List.empty[Set[Int]], row)
+
+    go(Set(row.head.toPair._1, row.head.toPair._2), row.tail)
+
   }
 
-
   def mayBeLine(row: Seq[Domino]): Boolean = {
-    if (!isFullSet(row: _*))
+    if (!isFullSet(row))
       false
     else {
       val (doubles, pairs, character) = helper(row)
@@ -133,7 +132,7 @@ object Domino {
   }
 
   def mayBeRing(row: Seq[Domino]): Boolean = {
-    if (!isFullSet(row: _*))
+    if (!isFullSet(row))
       false
     else {
       val (doubles, pairs, character) = helper(row)
@@ -143,30 +142,78 @@ object Domino {
   }
 
 
+  /* def mayBeUseAll(row: Seq[Domino]): Boolean = {
+     if (!isFullSet(row))
+       false
+     else {
+       val (doubles, pairs, character) = helper(row)
+
+       val isError = character.exists(pair =>
+         (pair._2 > 2) && (pair._2 % 2 == 1)
+       )
+
+       val characterNew = for ((k, v) <- character) yield {
+         if (doubles.exists(_.contain(k))) {
+           (k, if (v <= 4) 4 - v else (v - 4) % 2)
+         } else
+           (k, v % 2)
+       }
+       val characterSum = characterNew.values.sum
+       characterSum % 2 == 0 && characterSum <= 2 + 2 * doubles.size
+     }
+   }*/
+
   def mayBeUseAll(row: Seq[Domino]): Boolean = {
-    if (!isFullSet(row: _*))
-      false
+
+    if (!isFullSet(row)) false
     else {
-      val (doubles, pairs, character) = helper(row)
-      val characterNew = for ((k, v) <- character) yield {
-        if (doubles.exists(_.contain(k))) {
-          (k, if (v <= 4) 4 - v else (v - 4) % 2)
-        } else
-          (k, v % 2)
+
+      val sortedDomino = mutable.TreeSet(row: _*)
+
+      def go(tail: Set[Domino], ends: Map[Int, Int]): List[Domino] = {
+
+        var result = List.empty[Domino]
+
+        for (domino <- tail.filter(x => ends(x.min) != 0 || ends(x.max) != 0)) {
+          val filteredTail = tail.filter(_ != domino)
+          if (domino.isDouble) {
+            if (ends(domino.max) != 0) {
+              result = tryImprove(domino, filteredTail, ends, 0, 2, result)
+              if (result.size == tail.size) return result
+            }
+          } else {
+            if (ends(domino.min) != 0) {
+              result = tryImprove(domino, filteredTail, ends, -1, 1, result)
+              if (result.size == tail.size) return result
+            }
+            if (ends(domino.max) != 0) {
+              result = tryImprove(domino, filteredTail, ends, 1, -1, result)
+              if (result.size == tail.size) return result
+            }
+          }
+        }
+        result
       }
-      val characterSum = characterNew.values.sum
-      characterSum % 2 == 0 && characterSum <= 2 + 2 * doubles.size
+
+      def tryImprove(current: Domino, last: Set[Domino], v: Map[Int, Int], first: Int, second: Int, result: List[Domino]) = {
+        val r = current :: go(last, v.+(current.min -> (v(current.min) + first), current.max -> (v(current.max) + second)))
+        if (r.size > result.size) r else result
+      }
+      val emptyEnds = (0 to 6).foldLeft(Map.empty[Int, Int])((m, el) => m.+(el -> 0))
+      val (num_1, num_2) = sortedDomino.head.toPair
+      row.size == (sortedDomino.head :: go(sortedDomino.tail.toSet, if (sortedDomino.head.isDouble) emptyEnds.+(num_1 -> 4) else emptyEnds.+(num_1 -> 1, num_2 -> 1))).size
     }
   }
 
-  def generator(n: Int): Seq[Domino] = {
-    var set: mutable.Set[Domino] = mutable.Set.empty[Domino]
+
+  def generator(n: Int): mutable.TreeSet[Domino] = {
+    var set: mutable.TreeSet[Domino] = mutable.TreeSet.empty[Domino]
     while (set.size != n) {
       val l = Random.nextInt(7)
       val r = Random.nextInt(7)
       set += Domino(l, r)
     }
-    set.toSet.toSeq
+    set
   }
 
 

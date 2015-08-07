@@ -7,8 +7,8 @@ object DominoApp extends App {
     val seq = Domino.generator(i)
     println()
     println(seq)
-    println("\tUsed All - " + Domino.mayBeUseAll(seq))
-    println("\tLine - " + Domino.mayBeLine(seq))
-    println("\tRing - " + Domino.mayBeRing(seq))
+    println("\tUsed All - " + Domino.mayBeUseAll(seq.toList))
+    println("\tLine - " + Domino.mayBeLine(seq.toList))
+    println("\tRing - " + Domino.mayBeRing(seq.toList))
   }
 }
